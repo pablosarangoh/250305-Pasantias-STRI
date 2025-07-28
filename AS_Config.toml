@@ -1,0 +1,16 @@
+# Configuracion 1 para los datos 
+# Hora en UTC-5 (Hora Panamá)
+# Fecha en yyyy-MM-dd
+# El parametro medido es nivel del agua 
+# 'SubLocation' nos dice si se está registrando el High o Low
+
+Location = '@Location'
+Time = '@Time | UTC-05:00' # Hora Local Panamá
+DateOnly = '@Date'
+
+[Reading]
+ParameterId = 'HG'
+UnitId = 'mm'
+Value = '@Value (mm)'
+SubLocation = '@SubLocation'
+Comment = '@Comments'
