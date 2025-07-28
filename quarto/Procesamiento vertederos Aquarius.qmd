@@ -1,0 +1,304 @@
+---
+title: "Procesamiento de datos de vertederos para subirlos a la plataforma Aquarius"
+format: html
+editor: visual
+---
+
+# Introducción
+
+## **Librerías usadas**
+
+-   `readxl` permite leer archivos de Excel (.xls y .xlsx).
+
+-   `lubridate` facilita el manejo y transformación de fechas y horas.
+
+-   `hms` proporciona una clase especializada para representar duraciones de tipo hora-minuto-segundo.
+
+-   `tidyverse` conjunto de paquetes diseñados para ciencia de datos.
+
+-   `writexl` permite exportar dataframes a archivos Excel (.xlsx).
+
+## **Datos**
+
+-   `Base de datos vertederos.xlsx` contiene los valores de nivel del agua registrados en campo los cuales han sido digitados desde los cuadernos de campo entre 2009 - 2024.
+
+### Explicación de las columnas en la base de datos vertederos
+
+Los *nombres de las columnas* están basados en los atributos de campo (field visit attributes) de la plataforma [Aquarius](#0) .
+
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Nombres columna | Descripción                                    | Uso                                                                                                                                                                                                                                                 |
++=================+================================================+=====================================================================================================================================================================================================================================================+
+| Location        | Código para el vertedero.                      | El código del vertedero se construye de la siguiente forma:                                                                                                                                                                                         |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | WXXAS_CCC_UTM                                                                                                                                                                                                                                       |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | -   W: Vertedero (Weir en inglés)                                                                                                                                                                                                                   |
+|                 |                                                | -   XX: Número del vertedero                                                                                                                                                                                                                        |
+|                 |                                                | -   AS: Iniciales del proyecto Agua Salud                                                                                                                                                                                                           |
+|                 |                                                | -   CCC: Código del sitio del vertedero basado el el paper de Regina, J. A., Ogden, F. L., Hall, J. S., & Stallard, R. F. (2021). Agua Salud project experimental catchments hydrometric data, Panama. *Hydrological Processes*, *35*(9), e14359.   |
+|                 |                                                | -   UTM: Hora Universal Coordinada de Greenwich                                                                                                                                                                                                     |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | Ejemplo:                                                                                                                                                                                                                                            |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | W01AS_RAS_UTM                                                                                                                                                                                                                                       |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Date            | Fecha de la visita a campo (Field visit).      | El formato de la fecha debe ser **year-month-day (yyyy-mm-dd).**                                                                                                                                                                                    |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | Ejemplo:                                                                                                                                                                                                                                            |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | 2020-01-23                                                                                                                                                                                                                                          |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Time            | Hora a la que se realizó la medición de nivel. | La hora registrada en los diarios de campo corresponde al huso horario UTC+00:00, lo que equivale a cinco horas más que la hora local en Panamá (UTC−05:00).                                                                                        |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | Ejemplo:                                                                                                                                                                                                                                            |
+|                 |                                                |                                                                                                                                                                                                                                                     |
+|                 |                                                | Si la medición de nivel se realizó a las 9:00 a. m. (hora local), esta se registra como 14:00 (UTC+00:00).                                                                                                                                          |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Value (mm)      | Nivel de columna de agua.                      | El nivel de agua se mide utilizando una regla graduada ubicada sobre la cuña del vertedero, en ausencia de cualquier obstrucción. Los valores se reportan en milímetros de columna de agua (mm $H_2O$).                                             |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| SubLocation     | Localización de los sensores.                  | At the two weirs located at the study basin's outflow, we've positioned **pressure sensors** to measure **total pressure** (which includes both water and atmospheric pressure). These sensors are classified into '*High*' and '*Low*' categories. |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Comments        | Comentarios de campo.                          | Reportes de cualquier anomalía en campo, obstrucciones o contratiempos al realizar las mediciones.                                                                                                                                                  |
++-----------------+------------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+# Cargar librerías e importar datos
+
+```{r}
+# Cargar librerías 
+library(readxl)    # Leer archivos Excel (.xls y .xlsx)
+library(lubridate) # Manipular fechas y horas fácilmente
+library(hms)       # Representar tiempos del día (horas:minutos:segundos)
+library(tidyverse) # Conjunto de paquetes para manipulación, análisis y visualización de datos
+library(writexl)   # Escribir data frames en archivos Excel (.xlsx)
+```
+
+```{r}
+# Importar los datos desde el archivo Excel
+df <- read_excel("../data/Base de datos vertederos.xlsx",
+                 sheet = "Vertederos")
+
+# Visualizar las primeras filas
+head(df)
+```
+
+# Procesamiento de las fechas y horas
+
+Al examinar la estructura de los datos, se identifica que las columnas `Date` y `Time` están codificadas como objetos `POSIXct`, es decir, representan fechas y horas como el número de segundos desde el 1 de enero de 1970 a las 00:00:00 UTC.
+
+Para adecuar estas columnas al formato especificado en la sección [Explicación de las columnas en la base de datos vertederos], se realizará el siguiente procesamiento:
+
+El siguiente pedazo de código realiza lo siguiente:
+
+-   Se restan 5 horas a la columna `Time` para ajustar la zona horaria **(ver explicación del TOML).**
+
+-   El resultado se convierte a un objeto de clase `hms`, que representa solo la hora del día (ej. `"08:00:00"`).
+
+-   Se transforma la columna `Date` a clase `Date`, eliminando la información horaria.
+
+```{r}
+
+df <- df %>%
+  mutate(
+    Time = hms::as_hms(Time - hours(5)),
+    Date = as_date(Date))
+```
+
+# Reemplazo de nombres en columnas `Location` y `Sublocation`
+
+Los valores en las columnas `Location` y `SubLocation` no se encuentran en el formato requerido para su análisis o visualización.
+
+Por ello, serán estandarizados de acuerdo con los criterios definidos en la sección [Explicación de las columnas en la base de datos vertederos]. Este paso garantiza la consistencia en la nomenclatura y facilita el procesamiento posterior de los datos.
+
+## Filtrar la base de datos por ubicación (`Location`)
+
+La base de datos original contiene la información de todos los vertederos en un único archivo. Para facilitar su análisis, se requiere **separar estos datos en distintos subconjuntos**, uno por cada vertedero. Este procedimiento permite trabajar de forma más ordenada y específica con los datos de cada vertedero.
+
+A continuación se describe el proceso para lograrlo:
+
+1.  **Obtener vertederos únicos**\
+
+    Se extraen los valores únicos de la columna `Location`, que identifican los distintos vertederos. Esto se guarda en un vector llamado `valores_unicos`.
+
+    ```{r, eval=FALSE}
+    valores_unicos <- unique(df$Location)
+    ```
+
+2.  **Asignar nombres al vector**\
+
+    A cada elemento del vector `valores_unicos` se le asigna como nombre su propio valor. Esto convierte un vector como:
+
+    ```{r, eval=FALSE}
+    c("V05", "V12", "V11")
+    ```
+
+    En:
+
+    ```{r, eval=FALSE}
+    V05  V12  V11 
+    "V05" "V12" "V11"
+    ```
+
+    Esta asignación de nombres es importante porque se usará luego para nombrar automáticamente los elementos de la lista de data frames. Gracias a esto, podremos acceder a cada subconjunto por nombre usando la sintaxis `lista_dfs$V05`, `lista_dfs$V12`, etc.
+
+3.  **Crear una lista de data frames por localidad**\
+
+    Finalmente, se genera una lista llamada `lista_dfs`, donde cada elemento es un **data frame filtrado** que contiene únicamente las filas correspondientes a una localidad específica. Esto se logra mediante una función que:
+
+    -   Toma el data frame original (`df`)
+
+    -   Filtra las filas en que `Location` es igual al valor actual del vector (`.x`)
+
+    Por ejemplo, para `.x = "V05"`, se ejecuta:
+
+    ```{r, eval=FALSE}
+    df %>% filter(Location == "V05")
+    ```
+
+El resultado es un objeto `lista_dfs`, una lista en la que:
+
+-   Cada elemento representa los datos de un solo vertedero.
+
+-   Los nombres de los elementos corresponden a los valores únicos de `Location`.
+
+```{r}
+# 1. Obtener valores únicos de la columna Location
+valores_unicos <- unique(df$Location)
+
+# 2. Crear una lista de dataframes filtrados
+lista_dfs <- valores_unicos %>%
+  set_names() %>%
+  map(~ df %>% filter(Location == .x))
+```
+
+## **Asignación de códigos estandarizados a la columna `Location`**
+
+Una vez que se ha creado una lista (`lista_dfs`) donde cada elemento representa los datos de un vertedero específico, es necesario **reemplazar los valores de la columna `Location`** por su correspondiente **código estandarizado**.
+
+A continuación se describe el proceso para lograrlo:
+
+1.  **Describir los códigos estandarizados de los vertederos**
+
+    Se define un vector llamado `location_codes` que actúa como un **diccionario de equivalencias**, donde cada código original (`V01`, `V02`, etc.) se asocia con un nuevo Site code of the weir based on the paper of Regina, J. A., Ogden, F. L., Hall, J. S., & Stallard, R. F. (2021). Agua Salud project experimental catchments hydrometric data, Panama. *Hydrological Processes*, *35*(9), e14359.
+
+    ```{r}
+    location_codes <- c(
+      "V01" = "W01AS_RAS_UTM",
+      "V02" = "W02AS_FOR_UTM",
+      "V03" = "W03AS_MOS_UTM",
+      "V04" = "W04AS_TEK_UTM",
+      "V05" = "W05AS_COF_UTM",
+      "V06" = "W06AS_NAT_UTM",
+      "V07" = "W07AS_SEC_UTM",
+      "V08" = "W08AS_TKU_UTM",
+      "V09" = "W09AS_PAS_UTM",
+      "V10" = "W10AS_SAC_UTM",
+      "V11" = "W11AS_CTD_UTM",
+      "V12" = "W12AS_CUT_UTM",
+      "V13" = "W13AS_ARN_UTM"
+    )
+    ```
+
+2.  **Reescribir los códigos del vertedero en cada data frame**
+
+    Se recorre la lista `lista_dfs` usando `map2()`, y se reemplaza el valor de la columna `Location` en cada uno de los data frames por su correspondiente valor en `location_codes`.
+
+    Aquí `.x` representa cada data frame dentro de la lista, y `.y` representa el nombre de cada elemento de la lista (como `"V01"`, `"V02"`, etc.).
+
+    ```{r}
+    lista_dfs <- map2(lista_dfs, names(lista_dfs), ~ {
+      .x %>%
+        mutate(
+          Location = location_codes[.y]
+        )
+    })
+    ```
+
+Al final de este proceso se obtiene una lista (`lista_dfs`) donde:
+
+-   La columna `Location` en cada `data frame` ha sido actualizada con un código estandarizado (`"W01AS_RAS_UTM"`, `"W02AS_FOR_UTM"`, etc.).
+
+## **Asignación de códigos estandarizados a la columna `SubLocation`**
+
+Cada vertedero puede estar clasificado en una de dos categorías según el tipo de ubicación:
+
+-   `"H"` (High)
+
+-   `"L"` (Low)
+
+Estas categorías están representadas en la columna `SubLocation`.
+
+A continuación se describe el proceso para lograrlo:
+
+1.  **Recorrer la lista de data frames**
+
+    Se recorre la lista `lista_dfs` utilizando `map2()`, donde:
+
+    -   `.x` representa cada uno de los data frames dentro de la lista.
+
+    -   `.y` representa el nombre de cada elemento en la lista (`"V01"`, `"V02"`, etc.).
+
+2.  **Reescribir los códigos de** `SubLocation` **en cada data frame**
+
+    Dentro de cada data frame:
+
+    -   Se aplica `mutate()` para modificar la columna `SubLocation`.
+
+    -   Se usa `case_when()` para evaluar el contenido de esa columna y asignar nuevos valores según el caso:
+
+        -   Si el valor es `"H"`, se reemplaza por `paste0(.y, "_ASH")`, donde `.y` es el nombre del elemento (ej. `"V01_ASH"`).
+
+        -   Si el valor es `"L"`, se reemplaza por `paste0(.y, "_ASL")` (ej. `"V01_ASL"`).
+
+        -   Si el valor no es `"H"` ni `"L"`, se conserva el valor original (`TRUE ~ SubLocation`).
+
+El resultado es una nueva versión de `lista_dfs`, donde en cada data frame:
+
+-   La columna `SubLocation` ha sido actualizada para incluir el nombre del vertedero seguido de una etiqueta ( `"V01_ASH"`, `"V01_ASL"`, etc).
+
+    -   `"ASH"` para subcategoría `"H"`.
+
+    -   `"ASL"` para subcategoría `"L"`.
+
+```{r}
+lista_dfs <- map2(lista_dfs, names(lista_dfs), ~ {
+  .x %>% 
+    mutate(SubLocation = case_when(
+      SubLocation == "H" ~ paste0(.y, "_ASH"),
+      SubLocation == "L" ~ paste0(.y, "_ASL"),
+      TRUE ~ SubLocation
+ 
+   ))
+})
+```
+
+# Exportar datos 
+
+Una vez se realiza todo este proceso, exportamos los datos de la siguiente manera:
+
+1.  **Recorrer la lista de data frames**
+
+    Se utiliza la función `walk2()` para recorrer de manera paralela
+
+    -   `.x`: cada uno de los data frames dentro de la lista `lista_dfs`.
+
+    -   `.y`: los nombres asociados a cada elemento de la lista (`"V01"`, `"V02"`, etc.).
+
+2.  **Escribir archivos Excel**
+
+    Para cada par `.x` y `.y`:
+
+    -   Se exporta el data frame `.x` como un archivo Excel (`.xlsx`) utilizando `write_xlsx()`.
+
+    -   El archivo se guarda en la carpeta `"data/2013/"`.
+
+    -   El nombre del archivo corresponde al nombre del vertedero (`.y`) seguido de la extensión `.xlsx`. Por ejemplo: `"data/2013/V05.xlsx"`.
+
+```{r}
+walk2(
+  .x = lista_dfs,
+  .y = names(lista_dfs),
+  .f = ~ write_xlsx(.x, 
+                    path = file.path("data/2013/", paste0(.y, ".xlsx")))
+)
+```
